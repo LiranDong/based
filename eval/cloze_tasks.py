@@ -87,6 +87,7 @@ def generate_completions_batch(
     tokenizer: PreTrainedTokenizerBase,
     prompts: list,
     max_new_tokens: int = 48,
+    max_length: int = 4096,
     device: str = "cuda",
 ) -> list:
     """Generate completions for a batch of prompts.
@@ -110,6 +111,7 @@ def generate_completions_batch(
         prompts,
         return_tensors="pt",
         truncation=True,
+        max_length=max_length,
         padding=True,
         padding_side="left",
     ).to(device)
@@ -163,6 +165,7 @@ def evaluate_cloze_task(
     max_new_tokens: int = 48,
     max_examples: Optional[int] = None,
     batch_size: int = 8,
+    context_length: int = 4096,
     device: str = "cuda",
 ) -> ClozeEvalResult:
     """Evaluate a model on a single cloze-completion task.
@@ -185,6 +188,7 @@ def evaluate_cloze_task(
         max_new_tokens: Maximum tokens to generate per example.
         max_examples: Limit number of examples (for quick testing).
         batch_size: Number of examples to process in parallel.
+        context_length: Maximum tokens for input truncation.
         device: Device to run on.
 
     Returns:
@@ -212,7 +216,7 @@ def evaluate_cloze_task(
 
     logger.info(
         f"Evaluating {task_name}: {total} examples, batch_size={batch_size}, "
-        f"max_new_tokens={max_new_tokens}"
+        f"max_new_tokens={max_new_tokens}, context_length={context_length}"
     )
     model.eval()
 
@@ -232,6 +236,7 @@ def evaluate_cloze_task(
             batch_generated = generate_completions_batch(
                 model, tokenizer, batch_prompts,
                 max_new_tokens=max_new_tokens,
+                max_length=context_length,
                 device=device,
             )
         except Exception as e:
@@ -279,6 +284,7 @@ def evaluate_all_cloze_tasks(
     max_new_tokens: int = 48,
     max_examples: Optional[int] = None,
     batch_size: int = 8,
+    context_length: int = 4096,
     device: str = "cuda",
 ) -> dict:
     """Evaluate model on multiple cloze-completion tasks.
@@ -290,6 +296,7 @@ def evaluate_all_cloze_tasks(
         max_new_tokens: Maximum tokens to generate per example.
         max_examples: Limit number of examples per task (for quick testing).
         batch_size: Number of examples to process in parallel.
+        context_length: Maximum tokens for input truncation.
         device: Device to run on.
 
     Returns:
@@ -304,6 +311,7 @@ def evaluate_all_cloze_tasks(
             max_new_tokens=max_new_tokens,
             max_examples=max_examples,
             batch_size=batch_size,
+            context_length=context_length,
             device=device,
         )
         results[task_name] = result

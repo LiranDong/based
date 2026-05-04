@@ -140,6 +140,10 @@ def parse_args():
         help="Batch size for cloze generation (default: 8).",
     )
     parser.add_argument(
+        "--context_length", type=int, default=4096,
+        help="Max context length to truncate prompts for cloze tasks (default: 4096).",
+    )
+    parser.add_argument(
         "--max_examples", type=int, default=None,
         help="Limit examples per cloze task (for quick testing).",
     )
@@ -297,6 +301,7 @@ def run_cloze_eval(args, model, tokenizer, device: str):
         max_new_tokens=args.max_new_tokens,
         max_examples=args.max_examples,
         batch_size=args.cloze_batch_size,
+        context_length=args.context_length,
         device=device,
     )
 
