@@ -126,10 +126,10 @@ def parse_args():
 
     # ── Mode: cloze-completion (--task) ─────────────────────────────
     parser.add_argument(
-        "--task", type=str, nargs="+", default=None,
+        "--task", type=str, action="append", default=None,
         choices=list(TASK_REGISTRY.keys()),
         help="Cloze-completion task(s): swde, fda, squad_completion. "
-        "Can specify multiple: --task swde fda squad_completion",
+        "Can specify multiple: --task swde --task fda --task squad_completion",
     )
     parser.add_argument(
         "--max_new_tokens", type=int, default=48,
