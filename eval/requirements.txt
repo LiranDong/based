@@ -1,0 +1,32 @@
+# ── Based Eval: Requirements for Torch 2.7 + CUDA 12.8 ──
+#
+# Install torch 2.7 with CUDA 12.8 separately FIRST:
+#   pip install torch==2.7.0 --index-url https://download.pytorch.org/whl/cu128
+#
+# Then install these:
+
+# ── Core ──────────────────────────────────────────────
+numpy>=1.26.0
+datasets>=3.0.0
+tokenizers>=0.20.0
+transformers>=4.48.0
+accelerate>=0.30.0
+
+# ── FLA (Flash Linear Attention) ─────────────────────
+# Required for loading FLA-based models (RWKV-7, GLA, DeltaNet, etc.)
+# Install from GitHub:
+#   pip install git+https://github.com/fla-org/flash-linear-attention.git
+#
+# Or use a versioned release:
+#   pip install flash-linear-attention==0.3.2
+#
+# Uncomment one of the lines below:
+# flash-linear-attention @ git+https://github.com/fla-org/flash-linear-attention.git
+flash-linear-attention>=0.3.0
+
+# ── Optional: Better performance ─────────────────────
+# flash-attn>=2.7.0       # FlashAttention for standard attention layers (if model has them)
+# causal-conv1d>=1.4.0    # If model uses causal conv1d layers
+
+# ── Dev / Testing ─────────────────────────────────────
+# pytest>=8.0.0
