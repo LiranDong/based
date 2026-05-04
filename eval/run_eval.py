@@ -28,6 +28,9 @@ from eval.data_module import LMDataModule
 from eval.metrics import Perplexity
 from eval.cloze_tasks import evaluate_all_cloze_tasks, TASK_REGISTRY
 
+from ramnet import RAMNetConfig
+from fla.models import TransformerConfig, LinearAttentionConfig, HGRN2Config
+
 logger = logging.getLogger(__name__)
 
 # ── Dataset presets ────────────────────────────────────────────────────
@@ -131,6 +134,10 @@ def parse_args():
     parser.add_argument(
         "--max_new_tokens", type=int, default=48,
         help="Max generation tokens for cloze tasks (default: 48).",
+    )
+    parser.add_argument(
+        "--cloze_batch_size", type=int, default=8,
+        help="Batch size for cloze generation (default: 8).",
     )
     parser.add_argument(
         "--max_examples", type=int, default=None,
@@ -289,6 +296,7 @@ def run_cloze_eval(args, model, tokenizer, device: str):
         tasks=tasks,
         max_new_tokens=args.max_new_tokens,
         max_examples=args.max_examples,
+        batch_size=args.cloze_batch_size,
         device=device,
     )
 

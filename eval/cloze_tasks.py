@@ -82,31 +82,41 @@ def contains_score(prediction: str, labels: list) -> bool:
 
 # ── Generation ─────────────────────────────────────────────────────────
 
-def generate_completion(
+def generate_completions_batch(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizerBase,
-    prompt: str,
+    prompts: list,
     max_new_tokens: int = 48,
     device: str = "cuda",
-) -> str:
-    """Generate a completion for a single prompt.
+) -> list:
+    """Generate completions for a batch of prompts.
 
-    Uses greedy decoding (do_sample=False). Stops at the first newline
-    character in the decoded output, matching the original "until: ['\\n']"
-    behavior from lm-evaluation-harness.
+    Uses left-padding so that generation starts from the right side of each
+    sequence. Greedy decoding (do_sample=False). Stops at the first newline
+    in each decoded output.
 
     Args:
         model: The HuggingFace causal LM.
-        tokenizer: The tokenizer for the model.
-        prompt: The full input text (context + key).
-        max_new_tokens: Maximum tokens to generate.
+        tokenizer: The tokenizer.
+        prompts: List of prompt strings.
+        max_new_tokens: Maximum tokens to generate per sequence.
         device: Device to run on.
 
     Returns:
-        The generated text (new tokens only), truncated at first newline.
+        List of generated text strings (new tokens only, truncated at \\n).
     """
-    inputs = tokenizer(prompt, return_tensors="pt", truncation=True).to(device)
-    input_len = inputs.input_ids.shape[1]
+    # Tokenize with left-padding for batched generation
+    inputs = tokenizer(
+        prompts,
+        return_tensors="pt",
+        truncation=True,
+        padding=True,
+        padding_side="left",
+    ).to(device)
+
+    # Track original lengths (excluding padding) to slice generated tokens
+    attention_mask = inputs.attention_mask
+    input_lengths = attention_mask.sum(dim=1)  # [batch_size]
 
     with torch.no_grad():
         outputs = model.generate(
@@ -117,16 +127,21 @@ def generate_completion(
             eos_token_id=tokenizer.eos_token_id,
         )
 
-    # Decode only the newly generated tokens
-    generated_ids = outputs[0][input_len:]
-    generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
+    # Decode only new tokens for each sequence in the batch
+    results = []
+    for i in range(len(prompts)):
+        full_len = outputs[i].shape[0]
+        new_tokens = outputs[i][input_lengths[i]:]
+        text = tokenizer.decode(new_tokens, skip_special_tokens=True)
 
-    # Stop at first newline (matches "until": ["\\n"] in original config)
-    newline_idx = generated_text.find("\n")
-    if newline_idx != -1:
-        generated_text = generated_text[:newline_idx]
+        # Stop at first newline (matches original "until": ["\\n"])
+        nl = text.find("\n")
+        if nl != -1:
+            text = text[:nl]
 
-    return generated_text.strip()
+        results.append(text.strip())
+
+    return results
 
 
 # ── Main evaluation logic ──────────────────────────────────────────────
@@ -147,6 +162,7 @@ def evaluate_cloze_task(
     task_name: str,
     max_new_tokens: int = 48,
     max_examples: Optional[int] = None,
+    batch_size: int = 8,
     device: str = "cuda",
 ) -> ClozeEvalResult:
     """Evaluate a model on a single cloze-completion task.
@@ -168,6 +184,7 @@ def evaluate_cloze_task(
         task_name: One of "swde", "fda", "squad_completion".
         max_new_tokens: Maximum tokens to generate per example.
         max_examples: Limit number of examples (for quick testing).
+        batch_size: Number of examples to process in parallel.
         device: Device to run on.
 
     Returns:
@@ -193,42 +210,52 @@ def evaluate_cloze_task(
     correct = 0
     per_example_results = []
 
-    logger.info(f"Evaluating {task_name}: {total} examples, max_new_tokens={max_new_tokens}")
+    logger.info(
+        f"Evaluating {task_name}: {total} examples, batch_size={batch_size}, "
+        f"max_new_tokens={max_new_tokens}"
+    )
     model.eval()
 
-    for i in tqdm(range(total), desc=f"  {task_name}", unit="ex"):
-        example = dataset[i]
-        prompt = example["text"]
-        target = example["value"]
+    # Tokenize all prompts upfront for consistency with original lm-eval
+    prompts = [dataset[i]["text"] for i in range(total)]
+    targets = [dataset[i]["value"] for i in range(total)]
+
+    num_batches = (total + batch_size - 1) // batch_size
+
+    for batch_idx in tqdm(range(num_batches), desc=f"  {task_name}", unit="batch"):
+        start = batch_idx * batch_size
+        end = min(start + batch_size, total)
+        batch_prompts = prompts[start:end]
+        batch_targets = targets[start:end]
 
         try:
-            generated = generate_completion(
-                model, tokenizer, prompt,
+            batch_generated = generate_completions_batch(
+                model, tokenizer, batch_prompts,
                 max_new_tokens=max_new_tokens,
                 device=device,
             )
-            is_correct = contains_score(generated, [target])
         except Exception as e:
-            logger.warning(f"Error on example {i}: {e}")
-            generated = ""
-            is_correct = False
+            logger.warning(f"Error on batch {batch_idx}: {e}")
+            batch_generated = [""] * len(batch_prompts)
 
-        if is_correct:
-            correct += 1
+        for j, (generated, target) in enumerate(zip(batch_generated, batch_targets)):
+            i = start + j
+            is_correct = contains_score(generated, [target])
+            if is_correct:
+                correct += 1
+            per_example_results.append({
+                "idx": i,
+                "correct": is_correct,
+                "generated": generated,
+                "target": target,
+            })
 
-        per_example_results.append({
-            "idx": i,
-            "correct": is_correct,
-            "generated": generated,
-            "target": target,
-        })
-
-        # Log first few examples for debugging
-        if i < 3:
-            logger.debug(
-                f"  Example {i}: target='{target}' | generated='{generated}' | "
-                f"correct={is_correct}"
-            )
+            # Log first few examples for debugging
+            if i < 3:
+                logger.debug(
+                    f"  Example {i}: target='{target}' | generated='{generated}' | "
+                    f"correct={is_correct}"
+                )
 
     accuracy = correct / total if total > 0 else 0.0
     logger.info(
@@ -251,6 +278,7 @@ def evaluate_all_cloze_tasks(
     tasks: list,
     max_new_tokens: int = 48,
     max_examples: Optional[int] = None,
+    batch_size: int = 8,
     device: str = "cuda",
 ) -> dict:
     """Evaluate model on multiple cloze-completion tasks.
@@ -261,6 +289,7 @@ def evaluate_all_cloze_tasks(
         tasks: List of task names (e.g., ["swde", "fda", "squad_completion"]).
         max_new_tokens: Maximum tokens to generate per example.
         max_examples: Limit number of examples per task (for quick testing).
+        batch_size: Number of examples to process in parallel.
         device: Device to run on.
 
     Returns:
@@ -274,6 +303,7 @@ def evaluate_all_cloze_tasks(
             task_name=task_name,
             max_new_tokens=max_new_tokens,
             max_examples=max_examples,
+            batch_size=batch_size,
             device=device,
         )
         results[task_name] = result
